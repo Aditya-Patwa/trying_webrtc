@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Socket.IO chat</title>
+
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        body {
+            margin: 0;
+            padding-bottom: 3rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #form {
+            position: fixed;
+            bottom: 0;
+            padding: .5rem;
+            left: 0;
+            right: 0;
+            display: flex;
+            height: 3rem;
+            box-sizing: border-box;
+            backdrop-filter: blur(10px);
+        }
+
+        #messages {
+            list-style-type: none;
+            margin: 1.5rem;
+            padding: 0;
+        }
+
+        #messages>li {
+            padding: 0.5rem 1rem;
+            margin: 0rem .5rem 0 .5rem;
+        }
+    </style>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-wEmeIV1mKuiNpC+IOBjI7aAzPcEZeedi5yW5f2yOq55WWLwNGmvvx4Um1vskeMj0" crossorigin="anonymous">
+
+</head>
+
+<body>
+    <h1>WebRTC</h1>
+
+    <video id="localVideo" autoplay playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+
+
+    <div>
+        <button id="startButton">Start</button>
+        <button id="callButton">Join</button>
+        <button id="hangupButton">Hang Up</button>
+    </div>
+
+
+
+
+
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+        var socket = io();
+        const configuration = { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] }
+        let pc = new RTCPeerConnection(configuration);
+
+
+        let localVideo = document.getElementById("localVideo");
+        let remoteVideo = document.getElementById("remoteVideo");
+        let localStream = null;
+        let remoteStream = null;
+
+
+
+        let startButton = document.getElementById("startButton");
+        let joinButton = document.getElementById("callButton");
+
+
+
+        const startWebCam = async () => {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            remoteStream = new MediaStream();
+
+            localStream.getTracks().forEach((track) => {
+                pc.addTrack(track, localStream);
+            });
+
+            pc.ontrack = event => {
+                console.log(event);
+                event.streams[0].getTracks().forEach(track => {
+                    remoteStream.addTrack(track);
+                });
+            };
+
+
+            localVideo.srcObject = localStream;
+            remoteVideo.srcObject = remoteStream;
+        };
+
+        startWebCam();
+
+
+
+        startButton.onclick = async () => {
+
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    console.log(event.candidate.toJSON());
+                    socket.emit("add offer candidate", event.candidate.toJSON());
+                }
+            };
+
+            const offerDescription = await pc.createOffer();
+            await pc.setLocalDescription(offerDescription);
+
+
+            const offer = {
+                sdp: offerDescription.sdp,
+                type: offerDescription.type
+            };
+
+            console.log(offer);
+
+            socket.emit('offer', offer);
+            socket.on("answer", (msg) => {
+                console.log(msg);
+
+                if (!pc.currentRemoteDescription) {
+                    const answerDescription = new RTCSessionDescription(msg);
+                    pc.setRemoteDescription(answerDescription);
+                }
+            })
+
+            socket.on("add answer candidate", (c) => {
+                console.log(c);
+                const candidate = new RTCIceCandidate(c);
+                pc.addIceCandidate(candidate);
+            })
+        };
+
+
+        let joinOffer = null;
+
+
+        joinButton.onclick = async () => {
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    console.log(event.candidate.toJSON());
+                    socket.emit("add answer candidate", event.candidate.toJSON());
+                }
+            }
+
+            socket.emit("get offer");
+            socket.on("get offer", async (msg) => {
+                await pc.setRemoteDescription(new RTCSessionDescription(msg));
+
+                const ansDesc = await pc.createAnswer();
+                await pc.setLocalDescription(ansDesc);
+
+
+
+                const ans = {
+                    type: ansDesc.type,
+                    sdp: ansDesc.sdp
+                }
+
+                socket.emit("answer", ans);
+            })
+
+            socket.on("add offer candidate", (c) => {
+                console.log(c);
+                const candidate = new RTCIceCandidate(c);
+                pc.addIceCandidate(candidate);
+            })
+        };
+
+
+
+
+
+
+        //   form.addEventListener('submit', function(e) {
+        //     e.preventDefault();
+        //     if (input.value) {
+        //       socket.emit('chat message', input.value);
+        //       input.value = '';
+        //     }
+        //   });
+
+
+
+
+
+
+        socket.on('offer', (msg) => {
+
+            console.log(msg);
+
+            // if (!pc.currentRemoteDescription) {
+            //     const ansDes = new RTCSessionDescription(msg);
+
+            //     pc.setRemoteDescription(ansDes);
+            // }
+        });
+
+
+
+
+    </script>
+</body>
+
+</html>
